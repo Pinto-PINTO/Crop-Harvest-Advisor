@@ -13,6 +13,10 @@ from .weather_service import weather_service
 from .prediction_service import harvest_predictor
 from .firebase_config import FirebaseDB
 
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import date
+
 app = FastAPI(
     title="Crop Harvest Advisor API", 
     description="AI-powered crop analysis system for farmers",
@@ -32,6 +36,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Pydantic models for request/response
+class FarmCreate(BaseModel):
+    farm_name: str
+    owner_name: str
+    email: str
+    password: str  # In production, hash this!
+    phone: str
+    address: str
+    total_area: float
+    soil_type: str
+    irrigation_type: str
+
+class FarmLogin(BaseModel):
+    email: str
+    password: str
+
+class CropCreate(BaseModel):
+    farm_id: str
+    crop_type: str
+    crop_variety: str
+    planting_date: str
+    area_planted: float
+    expected_days_to_harvest: int
+    notes: Optional[str] = ""
+
+class CropUpdate(BaseModel):
+    crop_type: Optional[str] = None
+    crop_variety: Optional[str] = None
+    planting_date: Optional[str] = None
+    area_planted: Optional[float] = None
+    expected_days_to_harvest: Optional[int] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
 
 # Create uploads directory if it doesn't exist
 UPLOAD_DIR = "uploads"
@@ -420,3 +458,162 @@ async def validate_image_only(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+    
+# Farm Authentication Endpoints
+@app.post("/api/farm/register")
+async def register_farm(farm_data: FarmCreate):
+    """Register a new farm"""
+    try:
+        # Check if farm already exists
+        existing = await FirebaseDB.get_farm_by_email(farm_data.email)
+        if existing:
+            raise HTTPException(status_code=400, detail="Farm already registered with this email")
+        
+        # In production, hash the password!
+        farm_dict = farm_data.dict()
+        farm_dict['farm_id'] = str(uuid.uuid4())
+        
+        farm_id = await FirebaseDB.create_farm(farm_dict)
+        
+        return {
+            "success": True,
+            "farm_id": farm_id,
+            "message": "Farm registered successfully!"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/farm/login")
+async def login_farm(login_data: FarmLogin):
+    """Login farm user"""
+    try:
+        farm = await FirebaseDB.get_farm_by_email(login_data.email)
+        
+        if not farm:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # In production, compare hashed passwords!
+        if farm.get('password') != login_data.password:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Generate simple session token
+        session_token = str(uuid.uuid4())
+        
+        return {
+            "success": True,
+            "farm_id": farm['farm_id'],
+            "farm_name": farm['farm_name'],
+            "email": farm['email'],
+            "session_token": session_token,
+            "message": "Login successful!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/farm/{farm_id}")
+async def get_farm_profile(farm_id: str):
+    """Get farm profile details"""
+    farm = await FirebaseDB.get_farm_by_id(farm_id)
+    if not farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+    
+    # Remove password from response
+    farm.pop('password', None)
+    return farm
+
+@app.put("/api/farm/{farm_id}")
+async def update_farm_profile(farm_id: str, updates: dict):
+    """Update farm profile"""
+    success = await FirebaseDB.update_farm(farm_id, updates)
+    if not success:
+        raise HTTPException(status_code=404, detail="Farm not found")
+    return {"success": True, "message": "Profile updated"}
+
+# Crop Management Endpoints
+@app.post("/api/crops")
+async def add_crop(crop_data: CropCreate):
+    """Add a new crop to farm"""
+    try:
+        crop_dict = crop_data.dict()
+        crop_id = await FirebaseDB.create_crop(crop_dict)
+        return {
+            "success": True,
+            "crop_id": crop_id,
+            "message": "Crop added successfully!"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/crops/{farm_id}")
+async def get_farm_crops(farm_id: str):
+    """Get all crops for a farm with AI predictions"""
+    crops = await FirebaseDB.get_farm_crops(farm_id)
+    
+    # Enhance each crop with AI predictions
+    for crop in crops:
+        # Calculate days remaining
+        planting_date = datetime.fromisoformat(crop['planting_date'])
+        today = datetime.utcnow()
+        days_planted = (today - planting_date).days
+        days_remaining = max(0, crop['expected_days_to_harvest'] - days_planted)
+        
+        crop['days_planted'] = days_planted
+        crop['days_remaining'] = days_remaining
+        crop['harvest_percentage'] = min(100, int((days_planted / crop['expected_days_to_harvest']) * 100))
+        
+        # Determine crop status based on days remaining
+        if days_remaining <= 0:
+            crop['status'] = 'ready_to_harvest'
+            crop['status_text'] = 'Ready to Harvest!'
+            crop['status_color'] = '#10b981'
+        elif days_remaining <= 7:
+            crop['status'] = 'harvest_soon'
+            crop['status_text'] = f'Harvest in {days_remaining} days'
+            crop['status_color'] = '#f59e0b'
+        elif days_remaining <= 14:
+            crop['status'] = 'maturing'
+            crop['status_text'] = f'{days_remaining} days remaining'
+            crop['status_color'] = '#3b82f6'
+        else:
+            crop['status'] = 'growing'
+            crop['status_text'] = f'{days_remaining} days to harvest'
+            crop['status_color'] = '#8b5cf6'
+        
+        # Mock health status (in production, use actual analysis)
+        crop['health_status'] = 'healthy' if days_planted % 3 != 0 else 'check'
+        crop['health_text'] = 'Healthy' if days_planted % 3 != 0 else 'Needs Inspection'
+    
+    return {"crops": crops}
+
+@app.put("/api/crops/{crop_id}")
+async def update_crop(crop_id: str, updates: CropUpdate):
+    """Update crop information"""
+    # Filter out None values
+    update_dict = {k: v for k, v in updates.dict().items() if v is not None}
+    success = await FirebaseDB.update_crop(crop_id, update_dict)
+    if not success:
+        raise HTTPException(status_code=404, detail="Crop not found")
+    return {"success": True, "message": "Crop updated"}
+
+@app.delete("/api/crops/{crop_id}")
+async def delete_crop(crop_id: str):
+    """Delete a crop"""
+    success = await FirebaseDB.delete_crop(crop_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Crop not found")
+    return {"success": True, "message": "Crop deleted"}
+
+@app.get("/api/crops/analyze/{crop_id}")
+async def analyze_crop_with_ai(crop_id: str):
+    """Get AI analysis for a specific crop"""
+    # This would integrate with your existing image analysis
+    # For now, return mock data
+    return {
+        "crop_id": crop_id,
+        "health_score": 85,
+        "disease_risk": "low",
+        "recommendation": "Crop is growing well. Continue regular monitoring.",
+        "estimated_yield": "high"
+    }
