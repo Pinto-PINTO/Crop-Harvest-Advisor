@@ -1,0 +1,10 @@
+{
+    "python.defaultInterpreterPath": "/Users/menukapinto/Desktop/Crop Harvest/backend/venv/bin/python",
+    "python.analysis.extraPaths": [
+        "/Users/menukapinto/Desktop/Crop Harvest/backend/venv/lib/python3.9/site-packages"
+    ],
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "none"
+    }
+}
