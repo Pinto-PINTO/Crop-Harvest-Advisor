@@ -49,6 +49,9 @@ if db:
     feedback_collection = db.collection('feedback')
     weather_cache_collection = db.collection('weather_cache')
     users_collection = db.collection('users')
+    farms_collection = db.collection('farms')  # NEW
+    crops_collection = db.collection('crops')  # NEW
+    
     print("✅ Firestore collections ready")
 else:
     analyses_collection = None
@@ -195,3 +198,113 @@ class FirebaseDB:
         except Exception as e:
             print(f"Error saving user: {e}")
             return None
+        
+    # -------------- Farm CRUD operations -------------- 
+    @staticmethod
+    async def create_farm(farm_data):
+        """Create a new farm profile"""
+        if not db or not farms_collection:
+            return None
+        try:
+            farm_id = farm_data.get('farm_id', str(uuid.uuid4()))
+            farm_data['farm_id'] = farm_id
+            farm_data['created_at'] = datetime.utcnow().isoformat()
+            farm_data['updated_at'] = datetime.utcnow().isoformat()
+            farms_collection.document(farm_id).set(farm_data)
+            return farm_id
+        except Exception as e:
+            print(f"Error creating farm: {e}")
+            return None
+    
+    @staticmethod
+    async def get_farm_by_email(email):
+        """Get farm by email"""
+        if not db or not farms_collection:
+            return None
+        try:
+            farms = farms_collection.where('email', '==', email).limit(1).stream()
+            for farm in farms:
+                return farm.to_dict()
+            return None
+        except Exception as e:
+            print(f"Error getting farm: {e}")
+            return None
+    
+    @staticmethod
+    async def get_farm_by_id(farm_id):
+        """Get farm by ID"""
+        if not db or not farms_collection:
+            return None
+        try:
+            farm = farms_collection.document(farm_id).get()
+            return farm.to_dict() if farm.exists else None
+        except Exception as e:
+            print(f"Error getting farm: {e}")
+            return None
+    
+    @staticmethod
+    async def update_farm(farm_id, updates):
+        """Update farm profile"""
+        if not db or not farms_collection:
+            return None
+        try:
+            updates['updated_at'] = datetime.utcnow().isoformat()
+            farms_collection.document(farm_id).update(updates)
+            return True
+        except Exception as e:
+            print(f"Error updating farm: {e}")
+            return False
+    
+    # Crop CRUD operations
+    @staticmethod
+    async def create_crop(crop_data):
+        """Add a new crop to farm"""
+        if not db or not crops_collection:
+            return None
+        try:
+            crop_id = str(uuid.uuid4())
+            crop_data['crop_id'] = crop_id
+            crop_data['created_at'] = datetime.utcnow().isoformat()
+            crop_data['updated_at'] = datetime.utcnow().isoformat()
+            crops_collection.document(crop_id).set(crop_data)
+            return crop_id
+        except Exception as e:
+            print(f"Error creating crop: {e}")
+            return None
+    
+    @staticmethod
+    async def get_farm_crops(farm_id):
+        """Get all crops for a farm"""
+        if not db or not crops_collection:
+            return []
+        try:
+            crops = crops_collection.where('farm_id', '==', farm_id).stream()
+            return [crop.to_dict() for crop in crops]
+        except Exception as e:
+            print(f"Error getting crops: {e}")
+            return []
+    
+    @staticmethod
+    async def update_crop(crop_id, updates):
+        """Update crop information"""
+        if not db or not crops_collection:
+            return None
+        try:
+            updates['updated_at'] = datetime.utcnow().isoformat()
+            crops_collection.document(crop_id).update(updates)
+            return True
+        except Exception as e:
+            print(f"Error updating crop: {e}")
+            return False
+    
+    @staticmethod
+    async def delete_crop(crop_id):
+        """Delete a crop"""
+        if not db or not crops_collection:
+            return False
+        try:
+            crops_collection.document(crop_id).delete()
+            return True
+        except Exception as e:
+            print(f"Error deleting crop: {e}")
+            return False
