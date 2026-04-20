@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useFarm } from '../../context/FarmContext';
 import CropCard from './CropCard';
 import AddCropModal from './AddCropModal';
-import { FiPlus, FiTrello, FiCheckCircle, FiAlertCircle, FiCalendar } from 'react-icons/fi';
+import { FiPlus, FiLogOut } from 'react-icons/fi';
 
 const Dashboard = () => {
-  const { farm, crops, loadCrops, loading } = useFarm();
+  const { farm, crops, loadCrops, loading, logout, user } = useFarm();
   const [showAddModal, setShowAddModal] = useState(false);
   const [stats, setStats] = useState({
     total: 0,
@@ -15,8 +15,8 @@ const Dashboard = () => {
   });
 
   useEffect(() => {
-    if (farm?.farm_id) {
-      loadCrops(farm.farm_id);
+    if (farm?.uid) {
+      loadCrops(farm.uid);
     }
   }, [farm]);
 
@@ -33,6 +33,10 @@ const Dashboard = () => {
     });
   }, [crops]);
 
+  const handleLogout = async () => {
+    await logout();
+  };
+
   if (loading && crops.length === 0) {
     return <div className="spinner"></div>;
   }
@@ -46,13 +50,12 @@ const Dashboard = () => {
         </div>
         <div className="nav-user">
           <div className="farm-info">
-            <div className="farm-name">{farm?.farm_name}</div>
-            <div className="farm-email">{farm?.email}</div>
+            <div className="farm-name">{farm?.farm_name || 'My Farm'}</div>
+            <div className="farm-email">{user?.email || farm?.email}</div>
           </div>
-          <button className="logout-btn" onClick={() => {
-            localStorage.removeItem('farm_session');
-            window.location.reload();
-          }}>Logout</button>
+          <button className="logout-btn" onClick={handleLogout}>
+            <FiLogOut /> Logout
+          </button>
         </div>
       </nav>
 
@@ -107,7 +110,7 @@ const Dashboard = () => {
         ) : (
           <div className="crops-grid">
             {crops.map(crop => (
-              <CropCard key={crop.crop_id} crop={crop} />
+              <CropCard key={crop.crop_id || crop.id} crop={crop} />
             ))}
           </div>
         )}

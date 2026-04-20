@@ -7,6 +7,7 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut,
+  onAuthStateChanged,
   collection,
   doc,
   setDoc,
@@ -29,134 +30,17 @@ export const FarmProvider = ({ children }) => {
   const [crops, setCrops] = useState([]);
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
+  const [initializing, setInitializing] = useState(true);
 
-  // Monitor auth state
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        setUser(user);
-        // Load farm profile from Firestore
-        try {
-          const farmDoc = await getDoc(doc(db, 'farms', user.uid));
-          if (farmDoc.exists()) {
-            setFarm({ uid: user.uid, ...farmDoc.data() });
-          } else {
-            // Create basic farm profile if doesn't exist
-            const basicFarm = {
-              uid: user.uid,
-              email: user.email,
-              farm_name: user.email.split('@')[0],
-              created_at: new Date().toISOString()
-            };
-            await setDoc(doc(db, 'farms', user.uid), basicFarm);
-            setFarm(basicFarm);
-          }
-        } catch (error) {
-          console.error('Error loading farm:', error);
-        }
-        await loadCrops(user.uid);
-      } else {
-        setUser(null);
-        setFarm(null);
-        setCrops([]);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const registerWithFirebase = async (email, password, farmData) => {
-    setLoading(true);
-    try {
-      // Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Clean farm data before saving
-      const cleanFarmData = {
-        uid: user.uid,
-        email: email,
-        farm_name: farmData.farm_name || '',
-        owner_name: farmData.owner_name || '',
-        phone: farmData.phone || '',
-        address: farmData.address || '',
-        total_area: farmData.total_area || 0,
-        soil_type: farmData.soil_type || 'clay',
-        irrigation_type: farmData.irrigation_type || 'drip',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      // Store farm profile in Firestore
-      await setDoc(doc(db, 'farms', user.uid), cleanFarmData);
-      
-      // Also register with backend
-      try {
-        await axios.post(`${API_URL}/firebase-auth`, {
-          id_token: await user.getIdToken(),
-          email: email,
-          farm_name: farmData.farm_name,
-          owner_name: farmData.owner_name
-        });
-      } catch (backendError) {
-        console.warn('Backend registration warning:', backendError);
-      }
-      
-      toast.success('Farm registered successfully!');
-      return { success: true };
-    } catch (error) {
-      console.error('Registration error:', error);
-      toast.error(error.message || 'Registration failed');
-      return { success: false, error: error.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loginWithFirebase = async (email, password) => {
-    setLoading(true);
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Get farm profile from Firestore
-      const farmDoc = await getDoc(doc(db, 'farms', user.uid));
-      if (farmDoc.exists()) {
-        setFarm({ uid: user.uid, ...farmDoc.data() });
-      }
-      
-      toast.success('Login successful!');
-      return { success: true };
-    } catch (error) {
-      console.error('Login error:', error);
-      toast.error(error.message || 'Login failed');
-      return { success: false, error: error.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await signOut(auth);
-      setFarm(null);
-      setCrops([]);
-      toast.success('Logged out successfully');
-    } catch (error) {
-      toast.error('Logout failed');
-    }
-  };
-
+  // Load crops function - defined outside useEffect to avoid recreation
   const loadCrops = async (farmId) => {
     if (!farmId) return;
     
-    setLoading(true);
     try {
-      // Get crops from Firestore
       const q = query(collection(db, 'crops'), where('farm_id', '==', farmId));
       const querySnapshot = await getDocs(q);
       const cropsList = [];
       querySnapshot.forEach((doc) => {
-        // Store both id and crop_id for compatibility
         cropsList.push({ 
           id: doc.id, 
           crop_id: doc.id, 
@@ -164,7 +48,6 @@ export const FarmProvider = ({ children }) => {
         });
       });
       
-      // Enhance with calculations
       const enhancedCrops = cropsList.map(crop => {
         try {
           const plantingDate = new Date(crop.planting_date);
@@ -213,6 +96,137 @@ export const FarmProvider = ({ children }) => {
     } catch (error) {
       console.error('Error loading crops:', error);
       toast.error('Failed to load crops');
+    }
+  };
+
+  // Monitor auth state - FIXED to prevent infinite loop
+  useEffect(() => {
+    let isMounted = true;
+    
+    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+      console.log('Auth state changed:', authUser ? `User: ${authUser.email}` : 'No user');
+      
+      if (!isMounted) return;
+      
+      if (authUser) {
+        setUser(authUser);
+        try {
+          const farmDoc = await getDoc(doc(db, 'farms', authUser.uid));
+          if (farmDoc.exists()) {
+            setFarm({ uid: authUser.uid, ...farmDoc.data() });
+          } else {
+            const basicFarm = {
+              uid: authUser.uid,
+              email: authUser.email,
+              farm_name: authUser.email.split('@')[0],
+              created_at: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'farms', authUser.uid), basicFarm);
+            setFarm(basicFarm);
+          }
+          await loadCrops(authUser.uid);
+        } catch (error) {
+          console.error('Error loading farm:', error);
+        }
+      } else {
+        setUser(null);
+        setFarm(null);
+        setCrops([]);
+      }
+      
+      // Only set initializing to false after everything is done
+      if (isMounted) {
+        setInitializing(false);
+      }
+    });
+    
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []); // Empty dependency array - only run once on mount
+
+  const registerWithFirebase = async (email, password, farmData) => {
+    setLoading(true);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      const cleanFarmData = {
+        uid: user.uid,
+        email: email,
+        farm_name: farmData.farm_name || '',
+        owner_name: farmData.owner_name || '',
+        phone: farmData.phone || '',
+        address: farmData.address || '',
+        total_area: farmData.total_area || 0,
+        soil_type: farmData.soil_type || 'clay',
+        irrigation_type: farmData.irrigation_type || 'drip',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      await setDoc(doc(db, 'farms', user.uid), cleanFarmData);
+      
+      try {
+        await axios.post(`${API_URL}/firebase-auth`, {
+          id_token: await user.getIdToken(),
+          email: email,
+          farm_name: farmData.farm_name,
+          owner_name: farmData.owner_name
+        });
+      } catch (backendError) {
+        console.warn('Backend registration warning:', backendError);
+      }
+      
+      toast.success('Farm registered successfully!');
+      return { success: true };
+    } catch (error) {
+      console.error('Registration error:', error);
+      toast.error(error.message || 'Registration failed');
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginWithFirebase = async (email, password) => {
+    setLoading(true);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      const farmDoc = await getDoc(doc(db, 'farms', user.uid));
+      if (farmDoc.exists()) {
+        setFarm({ uid: user.uid, ...farmDoc.data() });
+      }
+      
+      toast.success('Login successful!');
+      return { success: true };
+    } catch (error) {
+      console.error('Login error:', error);
+      toast.error(error.message || 'Login failed');
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    setLoading(true);
+    try {
+      await signOut(auth);
+      setUser(null);
+      setFarm(null);
+      setCrops([]);
+      localStorage.removeItem('farm_session');
+      sessionStorage.clear();
+      toast.success('Logged out successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error(error.message || 'Logout failed');
+      return { success: false, error: error.message };
     } finally {
       setLoading(false);
     }
@@ -221,7 +235,6 @@ export const FarmProvider = ({ children }) => {
   const addCrop = async (cropData) => {
     setLoading(true);
     try {
-      // Get the authenticated user's UID
       const currentUser = auth.currentUser;
       
       if (!currentUser) {
@@ -229,10 +242,8 @@ export const FarmProvider = ({ children }) => {
         return { success: false, error: 'Not authenticated' };
       }
       
-      // Use the authenticated user's UID as farm_id
       const farmId = currentUser.uid;
       
-      // Clean the crop data
       const cleanCropData = {
         farm_id: farmId,
         crop_type: cropData.crop_type || '',
@@ -245,7 +256,6 @@ export const FarmProvider = ({ children }) => {
         updated_at: new Date().toISOString()
       };
       
-      // Only add optional fields if they exist
       if (cropData.ai_analysis) cleanCropData.ai_analysis = cropData.ai_analysis;
       if (cropData.image_url) cleanCropData.image_url = cropData.image_url;
       
@@ -265,29 +275,22 @@ export const FarmProvider = ({ children }) => {
   const updateCrop = async (cropId, updates) => {
     setLoading(true);
     try {
-      // Validate cropId
       if (!cropId) {
         console.error('No crop ID provided to updateCrop');
         toast.error('Cannot update crop: Missing crop ID');
         return false;
       }
       
-      console.log('Updating crop ID:', cropId);
-      console.log('Updates received:', updates);
-      
-      // Get the authenticated user
       const currentUser = auth.currentUser;
       if (!currentUser) {
         toast.error('You must be logged in to update crops');
         return false;
       }
       
-      // Build update object manually
       const updateData = {
         updated_at: new Date().toISOString()
       };
       
-      // Add each field individually if it exists
       if (updates.crop_type !== undefined && updates.crop_type !== '') {
         updateData.crop_type = updates.crop_type;
       }
@@ -307,17 +310,10 @@ export const FarmProvider = ({ children }) => {
         updateData.notes = updates.notes;
       }
       
-      console.log('Final update data:', updateData);
-      
-      // Get reference to the crop document
       const cropRef = doc(db, 'crops', cropId);
-      
-      // Update the document
       await updateDoc(cropRef, updateData);
       
       toast.success('Crop updated successfully');
-      
-      // Reload crops to refresh the list
       await loadCrops(currentUser.uid);
       
       return true;
@@ -370,12 +366,31 @@ export const FarmProvider = ({ children }) => {
     }
   };
 
+  // Show loading screen only during initial auth check
+  if (initializing) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+      }}>
+        <div style={{ textAlign: 'center', color: 'white' }}>
+          <div className="spinner" style={{ margin: '0 auto' }}></div>
+          <p style={{ marginTop: '1rem' }}>Loading your farm data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <FarmContext.Provider value={{
       user,
       farm,
       crops,
       loading,
+      initializing,
       registerWithFirebase,
       loginWithFirebase,
       logout,
