@@ -1,98 +1,214 @@
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from firebase_admin import credentials, firestore, storage, auth
 import os
 import json
 from datetime import datetime
+import uuid
+
+# Configuration from environment
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase-service-account.json")
+FIREBASE_STORAGE_BUCKET = os.getenv("FIREBASE_STORAGE_BUCKET", "")
 
 # Initialize Firebase Admin SDK
 def initialize_firebase():
-    """Initialize Firebase with service account"""
+    """Initialize Firebase Admin SDK"""
     
-    # Option 1: Using service account JSON file
-    cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase-service-account.json")
+    if firebase_admin._apps:
+        return firestore.client()
     
-    # Option 2: Using environment variable (for deployment)
-    cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
-    
-    if not firebase_admin._apps:
-        try:
-            if cred_json:
-                cred_dict = json.loads(cred_json)
-                cred = credentials.Certificate(cred_dict)
-            else:
-                # Check if file exists
-                if os.path.exists(cred_path):
-                    cred = credentials.Certificate(cred_path)
-                else:
-                    print(f"⚠️ Warning: Firebase credentials file not found at {cred_path}")
-                    print("   Firebase features will be disabled. Continue without Firebase?")
-                    return None
-            
+    try:
+        # Check if credentials file exists
+        if os.path.exists(FIREBASE_CREDENTIALS_PATH):
+            cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
             firebase_admin.initialize_app(cred, {
-                'storageBucket': os.getenv("FIREBASE_STORAGE_BUCKET", "crop-advisor-default.appspot.com")
+                'storageBucket': FIREBASE_STORAGE_BUCKET
             })
-            print("✅ Firebase initialized successfully!")
+            print("✅ Firebase Admin SDK initialized successfully!")
             return firestore.client()
-        except Exception as e:
-            print(f"❌ Error initializing Firebase: {e}")
-            print("   Firebase features will be disabled")
+        else:
+            print(f"❌ Firebase credentials file not found at {FIREBASE_CREDENTIALS_PATH}")
+            print("   Please download the service account key from Firebase Console")
             return None
-    
-    return firestore.client()
+    except Exception as e:
+        print(f"❌ Error initializing Firebase: {e}")
+        return None
 
 # Initialize Firestore
 db = initialize_firebase()
 
-# Collections (only if Firebase is available)
+# Collection references
 if db:
+    farms_collection = db.collection('farms')
+    crops_collection = db.collection('crops')
     analyses_collection = db.collection('analyses')
     feedback_collection = db.collection('feedback')
     weather_cache_collection = db.collection('weather_cache')
-    users_collection = db.collection('users')
     print("✅ Firestore collections ready")
 else:
+    farms_collection = None
+    crops_collection = None
     analyses_collection = None
     feedback_collection = None
     weather_cache_collection = None
-    users_collection = None
-    print("⚠️ Running without Firebase - data will not be persisted")
+    print("⚠️ Firebase not initialized - using demo mode")
 
 class FirebaseDB:
+    @staticmethod
+    def get_db():
+        return db
+    
+    @staticmethod
+    async def verify_firebase_token(id_token):
+        """Verify Firebase ID token from client"""
+        try:
+            decoded_token = auth.verify_id_token(id_token)
+            return decoded_token
+        except Exception as e:
+            print(f"Token verification failed: {e}")
+            return None
+    
+    @staticmethod
+    async def create_farm(farm_data):
+        """Create a new farm profile in Firestore"""
+        if not db or not farms_collection:
+            print("Firebase not available")
+            return None
+        
+        try:
+            farm_id = farm_data.get('uid') or str(uuid.uuid4())
+            farm_data['farm_id'] = farm_id
+            farm_data['created_at'] = datetime.utcnow().isoformat()
+            farm_data['updated_at'] = datetime.utcnow().isoformat()
+            farm_data['uid'] = farm_id
+            
+            farms_collection.document(farm_id).set(farm_data)
+            print(f"✅ Farm created in Firebase: {farm_id}")
+            return farm_id
+        except Exception as e:
+            print(f"❌ Error creating farm: {e}")
+            return None
+    
+    @staticmethod
+    async def get_farm_by_uid(uid):
+        """Get farm by Firebase UID"""
+        if not db or not farms_collection:
+            return None
+        
+        try:
+            doc = farms_collection.document(uid).get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            print(f"Error getting farm: {e}")
+            return None
+    
+    @staticmethod
+    async def get_farm_by_email(email):
+        """Get farm by email"""
+        if not db or not farms_collection:
+            return None
+        
+        try:
+            farms = farms_collection.where('email', '==', email).limit(1).stream()
+            for farm in farms:
+                return farm.to_dict()
+            return None
+        except Exception as e:
+            print(f"Error getting farm by email: {e}")
+            return None
+    
+    @staticmethod
+    async def update_farm(uid, updates):
+        """Update farm profile"""
+        if not db or not farms_collection:
+            return False
+        
+        try:
+            updates['updated_at'] = datetime.utcnow().isoformat()
+            farms_collection.document(uid).update(updates)
+            print(f"✅ Farm updated: {uid}")
+            return True
+        except Exception as e:
+            print(f"Error updating farm: {e}")
+            return False
+    
+    @staticmethod
+    async def create_crop(crop_data):
+        """Add a new crop to farm"""
+        if not db or not crops_collection:
+            return None
+        
+        try:
+            crop_id = str(uuid.uuid4())
+            crop_data['crop_id'] = crop_id
+            crop_data['created_at'] = datetime.utcnow().isoformat()
+            crop_data['updated_at'] = datetime.utcnow().isoformat()
+            
+            crops_collection.document(crop_id).set(crop_data)
+            print(f"✅ Crop created: {crop_id}")
+            return crop_id
+        except Exception as e:
+            print(f"Error creating crop: {e}")
+            return None
+    
+    @staticmethod
+    async def get_farm_crops(farm_id):
+        """Get all crops for a farm"""
+        if not db or not crops_collection:
+            return []
+        
+        try:
+            crops = crops_collection.where('farm_id', '==', farm_id).stream()
+            return [crop.to_dict() for crop in crops]
+        except Exception as e:
+            print(f"Error getting crops: {e}")
+            return []
+    
+    @staticmethod
+    async def update_crop(crop_id, updates):
+        """Update crop information"""
+        if not db or not crops_collection:
+            return False
+        
+        try:
+            updates['updated_at'] = datetime.utcnow().isoformat()
+            crops_collection.document(crop_id).update(updates)
+            print(f"✅ Crop updated: {crop_id}")
+            return True
+        except Exception as e:
+            print(f"Error updating crop: {e}")
+            return False
+    
+    @staticmethod
+    async def delete_crop(crop_id):
+        """Delete a crop"""
+        if not db or not crops_collection:
+            return False
+        
+        try:
+            crops_collection.document(crop_id).delete()
+            print(f"✅ Crop deleted: {crop_id}")
+            return True
+        except Exception as e:
+            print(f"Error deleting crop: {e}")
+            return False
+    
     @staticmethod
     async def save_analysis(analysis_data):
         """Save analysis to Firestore"""
         if not db or not analyses_collection:
-            print("Firebase not available, skipping save")
-            return "mock_id_" + str(datetime.utcnow().timestamp())
+            return None
         
         try:
-            # Make a copy to avoid modifying original
-            data_to_save = analysis_data.copy()
-            
-            # Ensure all datetime objects are converted to strings
-            if 'timestamp' in data_to_save and isinstance(data_to_save['timestamp'], datetime):
-                data_to_save['timestamp'] = data_to_save['timestamp'].isoformat()
-            
-            if 'created_at' not in data_to_save:
-                data_to_save["created_at"] = datetime.utcnow().isoformat()
-            
-            # Handle prediction dates
-            if 'prediction' in data_to_save:
-                if 'harvest_window_start' in data_to_save['prediction']:
-                    if isinstance(data_to_save['prediction']['harvest_window_start'], datetime):
-                        data_to_save['prediction']['harvest_window_start'] = data_to_save['prediction']['harvest_window_start'].isoformat()
-                if 'harvest_window_end' in data_to_save['prediction']:
-                    if isinstance(data_to_save['prediction']['harvest_window_end'], datetime):
-                        data_to_save['prediction']['harvest_window_end'] = data_to_save['prediction']['harvest_window_end'].isoformat()
-            
-            # Save to Firestore
-            doc_ref = analyses_collection.document()
-            doc_ref.set(data_to_save)
-            
-            print(f"✅ Analysis saved to Firebase with ID: {doc_ref.id}")
-            return doc_ref.id
+            analysis_id = str(uuid.uuid4())
+            analysis_data['analysis_id'] = analysis_id
+            analysis_data["created_at"] = datetime.utcnow().isoformat()
+            analyses_collection.document(analysis_id).set(analysis_data)
+            print(f"✅ Analysis saved: {analysis_id}")
+            return analysis_id
         except Exception as e:
-            print(f"❌ Error saving analysis: {e}")
+            print(f"Error saving analysis: {e}")
             return None
     
     @staticmethod
@@ -109,12 +225,10 @@ class FirebaseDB:
             
             analyses = []
             docs = query.stream()
-            
             for doc in docs:
                 data = doc.to_dict()
                 data['analysis_id'] = doc.id
                 analyses.append(data)
-            
             return analyses
         except Exception as e:
             print(f"Error getting analyses: {e}")
@@ -124,17 +238,16 @@ class FirebaseDB:
     async def save_feedback(feedback_data):
         """Save user feedback"""
         if not db or not feedback_collection:
-            print("Firebase not available, skipping feedback save")
-            return "mock_feedback_id"
+            return None
         
         try:
+            feedback_id = str(uuid.uuid4())
             feedback_data["created_at"] = datetime.utcnow().isoformat()
-            doc_ref = feedback_collection.document()
-            doc_ref.set(feedback_data)
-            print(f"✅ Feedback saved to Firebase with ID: {doc_ref.id}")
-            return doc_ref.id
+            feedback_collection.document(feedback_id).set(feedback_data)
+            print(f"✅ Feedback saved: {feedback_id}")
+            return feedback_id
         except Exception as e:
-            print(f"❌ Error saving feedback: {e}")
+            print(f"Error saving feedback: {e}")
             return None
     
     @staticmethod
@@ -144,13 +257,11 @@ class FirebaseDB:
             return False
         
         try:
-            doc_ref = weather_cache_collection.document(location)
-            doc_ref.set({
+            weather_cache_collection.document(location).set({
                 'location': location,
                 'data': weather_data,
                 'updated_at': datetime.utcnow().isoformat()
             })
-            print(f"✅ Weather cached for {location}")
             return True
         except Exception as e:
             print(f"Error caching weather: {e}")
@@ -163,35 +274,13 @@ class FirebaseDB:
             return None
         
         try:
-            doc_ref = weather_cache_collection.document(location)
-            doc = doc_ref.get()
-            
+            doc = weather_cache_collection.document(location).get()
             if doc.exists:
                 data = doc.to_dict()
-                # Check if cache is less than 1 hour old
                 cached_time = datetime.fromisoformat(data['updated_at'])
                 if (datetime.utcnow() - cached_time).seconds < 3600:
-                    print(f"✅ Using cached weather for {location}")
                     return data.get('data')
             return None
         except Exception as e:
             print(f"Error getting cached weather: {e}")
-            return None
-    
-    @staticmethod
-    async def save_user(user_data):
-        """Save or update user"""
-        if not db or not users_collection:
-            return None
-        
-        try:
-            email = user_data.get('email')
-            if email:
-                doc_ref = users_collection.document(email)
-                user_data['updated_at'] = datetime.utcnow().isoformat()
-                doc_ref.set(user_data, merge=True)
-                return email
-            return None
-        except Exception as e:
-            print(f"Error saving user: {e}")
             return None
