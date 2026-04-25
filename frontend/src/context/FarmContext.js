@@ -32,74 +32,119 @@ export const FarmProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [initializing, setInitializing] = useState(true);
 
-  // Load crops function - defined outside useEffect to avoid recreation
   const loadCrops = async (farmId) => {
-    if (!farmId) return;
+  if (!farmId) return;
+  
+  setLoading(true);
+  try {
+    const q = query(collection(db, 'crops'), where('farm_id', '==', farmId));
+    const querySnapshot = await getDocs(q);
+    const cropsList = [];
+    querySnapshot.forEach((doc) => {
+      cropsList.push({ 
+        id: doc.id, 
+        crop_id: doc.id, 
+        ...doc.data() 
+      });
+    });
     
-    try {
-      const q = query(collection(db, 'crops'), where('farm_id', '==', farmId));
-      const querySnapshot = await getDocs(q);
-      const cropsList = [];
-      querySnapshot.forEach((doc) => {
-        cropsList.push({ 
-          id: doc.id, 
-          crop_id: doc.id, 
-          ...doc.data() 
-        });
-      });
-      
-      const enhancedCrops = cropsList.map(crop => {
-        try {
-          const plantingDate = new Date(crop.planting_date);
-          const today = new Date();
-          const daysPlanted = Math.floor((today - plantingDate) / (1000 * 60 * 60 * 24));
-          const daysRemaining = Math.max(0, (crop.expected_days_to_harvest || 90) - daysPlanted);
-          const harvestPercentage = Math.min(100, Math.floor((daysPlanted / (crop.expected_days_to_harvest || 90)) * 100));
-          
-          let status, statusText, statusColor;
-          if (daysRemaining <= 0) {
-            status = 'ready_to_harvest';
-            statusText = 'Ready to Harvest!';
-            statusColor = '#10b981';
-          } else if (daysRemaining <= 7) {
-            status = 'harvest_soon';
-            statusText = `Harvest in ${daysRemaining} days`;
-            statusColor = '#f59e0b';
-          } else if (daysRemaining <= 14) {
-            status = 'maturing';
-            statusText = `${daysRemaining} days remaining`;
-            statusColor = '#3b82f6';
-          } else {
-            status = 'growing';
-            statusText = `${daysRemaining} days to harvest`;
-            statusColor = '#8b5cf6';
-          }
-          
-          return {
-            ...crop,
-            days_planted: daysPlanted,
-            days_remaining: daysRemaining,
-            harvest_percentage: harvestPercentage,
-            status,
-            status_text: statusText,
-            status_color: statusColor,
-            health_status: daysPlanted % 3 !== 0 ? 'healthy' : 'check',
-            health_text: daysPlanted % 3 !== 0 ? 'Healthy' : 'Needs Inspection'
-          };
-        } catch (err) {
-          console.error('Error enhancing crop:', err);
-          return crop;
+    const enhancedCrops = cropsList.map(crop => {
+      try {
+        const plantingDate = new Date(crop.planting_date);
+        const today = new Date();
+        const daysPlanted = Math.floor((today - plantingDate) / (1000 * 60 * 60 * 24));
+        const daysRemaining = Math.max(0, (crop.expected_days_to_harvest || 90) - daysPlanted);
+        const harvestPercentage = Math.min(100, Math.floor((daysPlanted / (crop.expected_days_to_harvest || 90)) * 100));
+        
+        let status, statusText, statusColor;
+        if (daysRemaining <= 0) {
+          status = 'ready_to_harvest';
+          statusText = 'Ready to Harvest!';
+          statusColor = '#10b981';
+        } else if (daysRemaining <= 7) {
+          status = 'harvest_soon';
+          statusText = `Harvest in ${daysRemaining} days`;
+          statusColor = '#f59e0b';
+        } else if (daysRemaining <= 14) {
+          status = 'maturing';
+          statusText = `${daysRemaining} days remaining`;
+          statusColor = '#3b82f6';
+        } else {
+          status = 'growing';
+          statusText = `${daysRemaining} days to harvest`;
+          statusColor = '#8b5cf6';
         }
-      });
-      
-      setCrops(enhancedCrops);
-    } catch (error) {
-      console.error('Error loading crops:', error);
-      toast.error('Failed to load crops');
-    }
-  };
+        
+        // Determine health status based on AI analysis
+        let health_status = 'healthy';
+        let health_text = 'Healthy';
+        let health_color = 'bg-green-50 text-green-700';
+        let health_border = 'border-green-200';
+        
+        if (crop.ai_analysis?.disease) {
+          const disease = crop.ai_analysis.disease.disease;
+          const severity = crop.ai_analysis.disease.severity;
+          const confidence = crop.ai_analysis.confidence || 0.7;
+          
+          if (disease !== 'healthy') {
+            if (severity === 'high') {
+              health_status = 'disease_severe';
+              health_text = `⚠️ ${disease.replace('_', ' ').toUpperCase()} - ACT NOW!`;
+              health_color = 'bg-red-50 text-red-700';
+              health_border = 'border-red-200';
+            } else if (severity === 'medium') {
+              health_status = 'disease_moderate';
+              health_text = `⚠️ ${disease.replace('_', ' ').toUpperCase()} - Monitor Closely`;
+              health_color = 'bg-orange-50 text-orange-700';
+              health_border = 'border-orange-200';
+            } else {
+              health_status = 'disease_mild';
+              health_text = `⚠️ ${disease.replace('_', ' ').toUpperCase()} - Needs Inspection`;
+              health_color = 'bg-yellow-50 text-yellow-700';
+              health_border = 'border-yellow-200';
+            }
+          } else if (confidence < 0.7) {
+            health_status = 'uncertain';
+            health_text = '🤔 Needs Inspection';
+            health_color = 'bg-yellow-50 text-yellow-700';
+            health_border = 'border-yellow-200';
+          }
+        } else if (crop.health_status === 'check') {
+          health_status = 'check';
+          health_text = 'Needs Inspection';
+          health_color = 'bg-yellow-50 text-yellow-700';
+          health_border = 'border-yellow-200';
+        }
+        
+        return {
+          ...crop,
+          days_planted: daysPlanted,
+          days_remaining: daysRemaining,
+          harvest_percentage: harvestPercentage,
+          status,
+          status_text: statusText,
+          status_color: statusColor,
+          health_status,
+          health_text,
+          health_color,
+          health_border
+        };
+      } catch (err) {
+        console.error('Error enhancing crop:', err);
+        return crop;
+      }
+    });
+    
+    setCrops(enhancedCrops);
+  } catch (error) {
+    console.error('Error loading crops:', error);
+    toast.error('Failed to load crops');
+  } finally {
+    setLoading(false);
+  }
+};
 
-  // Monitor auth state - FIXED to prevent infinite loop
+  // Monitor auth state
   useEffect(() => {
     let isMounted = true;
     
@@ -134,7 +179,6 @@ export const FarmProvider = ({ children }) => {
         setCrops([]);
       }
       
-      // Only set initializing to false after everything is done
       if (isMounted) {
         setInitializing(false);
       }
@@ -144,7 +188,7 @@ export const FarmProvider = ({ children }) => {
       isMounted = false;
       unsubscribe();
     };
-  }, []); // Empty dependency array - only run once on mount
+  }, []);
 
   const registerWithFirebase = async (email, password, farmData) => {
     setLoading(true);
@@ -221,7 +265,6 @@ export const FarmProvider = ({ children }) => {
       setCrops([]);
       localStorage.removeItem('farm_session');
       sessionStorage.clear();
-      toast.success('Logged out successfully');
       return { success: true };
     } catch (error) {
       console.error('Logout error:', error);
@@ -309,6 +352,12 @@ export const FarmProvider = ({ children }) => {
       if (updates.notes !== undefined) {
         updateData.notes = updates.notes;
       }
+      if (updates.ai_analysis !== undefined) {
+        updateData.ai_analysis = updates.ai_analysis;
+      }
+      if (updates.last_reanalyzed !== undefined) {
+        updateData.last_reanalyzed = updates.last_reanalyzed;
+      }
       
       const cropRef = doc(db, 'crops', cropId);
       await updateDoc(cropRef, updateData);
@@ -366,19 +415,32 @@ export const FarmProvider = ({ children }) => {
     }
   };
 
-  // Show loading screen only during initial auth check
+  const refreshCrops = async () => {
+    if (user?.uid) {
+      await loadCrops(user.uid);
+    }
+  };
+
   if (initializing) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-      }}>
-        <div style={{ textAlign: 'center', color: 'white' }}>
-          <div className="spinner" style={{ margin: '0 auto' }}></div>
-          <p style={{ marginTop: '1rem' }}>Loading your farm data...</p>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl animate-pulse opacity-20"></div>
+            <div className="relative w-24 h-24 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg animate-bounce">
+              <span className="text-5xl">🌾</span>
+            </div>
+            <div className="absolute inset-0 rounded-2xl border-4 border-emerald-200 border-t-emerald-500 animate-spin"></div>
+          </div>
+          <h2 className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent mb-2">
+            CropHarvest Advisor
+          </h2>
+          <div className="flex items-center justify-center gap-2 mt-3">
+            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse delay-150"></div>
+            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse delay-300"></div>
+          </div>
+          <p className="text-gray-500 text-sm mt-4">Loading your farm data...</p>
         </div>
       </div>
     );
@@ -398,7 +460,8 @@ export const FarmProvider = ({ children }) => {
       addCrop,
       updateCrop,
       deleteCrop,
-      updateFarmProfile
+      updateFarmProfile,
+      refreshCrops
     }}>
       {children}
     </FarmContext.Provider>
