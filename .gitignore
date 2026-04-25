@@ -1,10 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-<<<<<<< HEAD
-=======
 .eslintcache
->>>>>>> ui
 /node_modules
 /.pnp
 .pnp.js
@@ -12,8 +9,6 @@
 # testing
 /coverage
 
-<<<<<<< HEAD
-=======
 
 node_modules/
 frontend/node_modules/
@@ -24,8 +19,6 @@ backend/uploads/
 *.pack
 .eslintcache
 
-
->>>>>>> ui
 # production
 /build
 
@@ -51,3 +44,6 @@ backend/firebase-service-account.json
 
 # OS generated files
 .DS_Store
+
+backend/uploads/
+uploads/
