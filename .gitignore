@@ -16,6 +16,8 @@ backend/uploads/
 *.jpg
 *.png
 *.jpeg
+*.pack
+.eslintcache
 
 
 # production
