@@ -36,6 +36,7 @@ export const FarmProvider = ({ children }) => {
   const loadCrops = async (farmId) => {
     if (!farmId) return;
     
+    setLoading(true);
     try {
       const q = query(collection(db, 'crops'), where('farm_id', '==', farmId));
       const querySnapshot = await getDocs(q);
@@ -96,7 +97,9 @@ export const FarmProvider = ({ children }) => {
     } catch (error) {
       console.error('Error loading crops:', error);
       toast.error('Failed to load crops');
-    }
+    } finally {
+    setLoading(false); // Make sure this is set to false after
+  }
   };
 
   // Monitor auth state - FIXED to prevent infinite loop
@@ -213,24 +216,25 @@ export const FarmProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    setLoading(true);
-    try {
-      await signOut(auth);
-      setUser(null);
-      setFarm(null);
-      setCrops([]);
-      localStorage.removeItem('farm_session');
-      sessionStorage.clear();
-      toast.success('Logged out successfully');
-      return { success: true };
-    } catch (error) {
-      console.error('Logout error:', error);
-      toast.error(error.message || 'Logout failed');
-      return { success: false, error: error.message };
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  try {
+    await signOut(auth);
+    setUser(null);
+    setFarm(null);
+    setCrops([]);
+    localStorage.removeItem('farm_session');
+    sessionStorage.clear();
+    // Remove the toast here - it's already shown in Dashboard handleLogout
+    // toast.success('Logged out successfully');
+    return { success: true };
+  } catch (error) {
+    console.error('Logout error:', error);
+    toast.error(error.message || 'Logout failed');
+    return { success: false, error: error.message };
+  } finally {
+    setLoading(false);
+  }
+};
 
   const addCrop = async (cropData) => {
     setLoading(true);
@@ -367,23 +371,7 @@ export const FarmProvider = ({ children }) => {
   };
 
   // Show loading screen only during initial auth check
-  if (initializing) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-      }}>
-        <div style={{ textAlign: 'center', color: 'white' }}>
-          <div className="spinner" style={{ margin: '0 auto' }}></div>
-          <p style={{ marginTop: '1rem' }}>Loading your farm data...</p>
-        </div>
-      </div>
-    );
-  }
-
+  
   return (
     <FarmContext.Provider value={{
       user,

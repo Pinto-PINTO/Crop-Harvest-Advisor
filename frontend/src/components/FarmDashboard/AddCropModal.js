@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { useFarm } from '../../context/FarmContext';
-import { FiUpload, FiCamera, FiX, FiActivity, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
+import { FiCamera, FiX, FiCheckCircle, FiAlertCircle, FiArrowLeft } from 'react-icons/fi';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const API_URL = 'http://localhost:8000/api';
 
 const AddCropModal = ({ onClose }) => {
   const { farm, addCrop, loading } = useFarm();
-  const [step, setStep] = useState(1); // 1: Form, 2: Image Upload, 3: AI Analysis Results
+  const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     farm_id: farm?.farm_id,
     crop_type: '',
@@ -55,7 +56,6 @@ const AddCropModal = ({ onClose }) => {
     formData.append('user_id', farm?.farm_id || 'anonymous');
 
     try {
-      // Simulate upload progress
       const interval = setInterval(() => {
         setUploadProgress(prev => Math.min(prev + 10, 90));
       }, 200);
@@ -71,9 +71,7 @@ const AddCropModal = ({ onClose }) => {
       setAnalysisResult(response.data);
       toast.success('AI Analysis complete!');
       
-      // Auto-fill form with AI recommendations
       if (response.data.final_recommendation) {
-        // Suggest expected days to harvest based on AI analysis
         const suggestedDays = response.data.prediction?.days_to_wait + 30 || 90;
         setFormData(prev => ({
           ...prev,
@@ -92,302 +90,169 @@ const AddCropModal = ({ onClose }) => {
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  
-  // Prepare data with proper values
-  const submitData = {
-    farm_id: farm?.uid || farm?.farm_id,  // Ensure farm_id is correct
-    crop_type: formData.crop_type,
-    crop_variety: formData.crop_variety,
-    planting_date: formData.planting_date,
-    area_planted: parseFloat(formData.area_planted) || 0,
-    expected_days_to_harvest: parseInt(formData.expected_days_to_harvest) || 90,
-    notes: formData.notes || '',
-    ai_analysis: analysisResult ? {
-      maturity: analysisResult.image_analysis?.maturity,
-      disease: analysisResult.image_analysis?.disease,
-      recommendation: analysisResult.final_recommendation,
-      confidence: analysisResult.analysis_confidence,
-      prediction: analysisResult.prediction
-    } : null,
-    image_url: previewUrl || null
+    e.preventDefault();
+    
+    const submitData = {
+      farm_id: farm?.uid || farm?.farm_id,
+      crop_type: formData.crop_type,
+      crop_variety: formData.crop_variety,
+      planting_date: formData.planting_date,
+      area_planted: parseFloat(formData.area_planted) || 0,
+      expected_days_to_harvest: parseInt(formData.expected_days_to_harvest) || 90,
+      notes: formData.notes || '',
+      ai_analysis: analysisResult ? {
+        maturity: analysisResult.image_analysis?.maturity,
+        disease: analysisResult.image_analysis?.disease,
+        recommendation: analysisResult.final_recommendation,
+        confidence: analysisResult.analysis_confidence,
+        prediction: analysisResult.prediction
+      } : null,
+      image_url: previewUrl || null
+    };
+    
+    const result = await addCrop(submitData);
+    if (result.success) {
+      onClose();
+    }
   };
-  
-  console.log('Submitting crop data:', submitData);
-  const result = await addCrop(submitData);
-  if (result.success) {
-    onClose();
-  }
-};
-
-  const renderStep1 = () => (
-    <form onSubmit={(e) => { e.preventDefault(); setStep(2); }}>
-      <div className="modal-body">
-        <div className="form-group">
-          <label>Crop Type *</label>
-          <input
-            type="text"
-            required
-            value={formData.crop_type}
-            onChange={(e) => setFormData({...formData, crop_type: e.target.value})}
-            placeholder="e.g., Rice, Wheat, Corn"
-          />
-        </div>
-        
-        <div className="form-group">
-          <label>Crop Variety *</label>
-          <input
-            type="text"
-            required
-            value={formData.crop_variety}
-            onChange={(e) => setFormData({...formData, crop_variety: e.target.value})}
-            placeholder="e.g., Basmati, Bg 300"
-          />
-        </div>
-        
-        <div className="form-group">
-          <label>Planting Date *</label>
-          <input
-            type="date"
-            required
-            value={formData.planting_date}
-            onChange={(e) => setFormData({...formData, planting_date: e.target.value})}
-          />
-        </div>
-        
-        <div className="form-group">
-          <label>Area Planted (hectares) *</label>
-          <input
-            type="number"
-            step="0.1"
-            required
-            value={formData.area_planted}
-            onChange={(e) => setFormData({...formData, area_planted: e.target.value})}
-            placeholder="e.g., 2.5"
-          />
-        </div>
-        
-        <div className="form-group">
-          <label>Expected Days to Harvest *</label>
-          <input
-            type="number"
-            required
-            value={formData.expected_days_to_harvest}
-            onChange={(e) => setFormData({...formData, expected_days_to_harvest: e.target.value})}
-            placeholder="e.g., 120"
-          />
-        </div>
-        
-        <div className="form-group">
-          <label>Notes (Optional)</label>
-          <textarea
-            rows="3"
-            value={formData.notes}
-            onChange={(e) => setFormData({...formData, notes: e.target.value})}
-            placeholder="Any additional information about this crop..."
-          />
-        </div>
-      </div>
-      
-      <div className="modal-footer">
-        <button type="button" className="btn btn-outline" onClick={onClose}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn-primary">
-          Next: Add Image →
-        </button>
-      </div>
-    </form>
-  );
-
-  const renderStep2 = () => (
-    <div>
-      <div className="modal-body">
-        <div className="image-upload-section" style={{ textAlign: 'center' }}>
-          <h4>Upload Crop Image for AI Analysis</h4>
-          <p style={{ color: '#6b7280', marginBottom: '1rem' }}>
-            Our AI will analyze the image to detect maturity, diseases, and provide harvest recommendations
-          </p>
-          
-          {!previewUrl ? (
-            <div 
-              className="upload-area"
-              onClick={() => document.getElementById('cropImageInput').click()}
-              style={{
-                border: '2px dashed #cbd5e0',
-                borderRadius: '8px',
-                padding: '2rem',
-                cursor: 'pointer',
-                background: '#f7fafc'
-              }}
-            >
-              <FiCamera size={48} color="#667eea" />
-              <p>Click to upload crop image</p>
-              <small>JPEG or PNG (max 10MB)</small>
-            </div>
-          ) : (
-            <div>
-              <img src={previewUrl} alt="Crop preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
-              <button 
-                className="btn btn-outline" 
-                onClick={() => {
-                  setSelectedImage(null);
-                  setPreviewUrl(null);
-                  setAnalysisResult(null);
-                }}
-                style={{ marginTop: '0.5rem' }}
-              >
-                Change Image
-              </button>
-            </div>
-          )}
-          
-          <input
-            id="cropImageInput"
-            type="file"
-            accept="image/jpeg,image/png"
-            onChange={handleImageSelect}
-            style={{ display: 'none' }}
-          />
-          
-          {analyzing && (
-            <div style={{ marginTop: '1rem' }}>
-              <div className="progress-bar">
-                <div className="progress-bg">
-                  <div className="progress-fill" style={{ width: `${uploadProgress}%`, background: '#667eea' }}></div>
-                </div>
-              </div>
-              <p>AI Analyzing crop... {uploadProgress}%</p>
-            </div>
-          )}
-        </div>
-      </div>
-      
-      <div className="modal-footer">
-        <button type="button" className="btn btn-outline" onClick={() => setStep(1)}>
-          Back
-        </button>
-        <button 
-          className="btn btn-primary" 
-          onClick={handleAIAnalysis}
-          disabled={!selectedImage || analyzing}
-        >
-          {analyzing ? 'Analyzing...' : 'Run AI Analysis'}
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderStep3 = () => (
-    <div>
-      <div className="modal-body">
-        <h4 style={{ marginBottom: '1rem' }}>🤖 AI Analysis Results</h4>
-        
-        {analysisResult && (
-          <div>
-            {/* Recommendation Card */}
-            <div style={{
-              background: analysisResult.color_code + '15',
-              borderLeft: `4px solid ${analysisResult.color_code}`,
-              padding: '1rem',
-              borderRadius: '8px',
-              marginBottom: '1rem'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                {analysisResult.action_priority === 'high' ? 
-                  <FiCheckCircle color={analysisResult.color_code} size={24} /> : 
-                  <FiAlertCircle color={analysisResult.color_code} size={24} />
-                }
-                <div>
-                  <strong>AI Recommendation:</strong>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: analysisResult.color_code }}>
-                    {analysisResult.final_recommendation}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Maturity Analysis */}
-            <div className="info-row">
-              <span className="info-label">Maturity Stage:</span>
-              <span className="info-value">
-                {analysisResult.image_analysis.maturity.stage.toUpperCase()} 
-                ({analysisResult.image_analysis.maturity.score}%)
-              </span>
-            </div>
-            
-            <div className="info-row">
-              <span className="info-label">Disease Status:</span>
-              <span className="info-value">
-                {analysisResult.image_analysis.disease.disease.replace('_', ' ').toUpperCase()}
-                {analysisResult.image_analysis.disease.severity !== 'low' && 
-                  ` - ${analysisResult.image_analysis.disease.severity.toUpperCase()} severity`
-                }
-              </span>
-            </div>
-            
-            <div className="info-row">
-              <span className="info-label">Analysis Confidence:</span>
-              <span className="info-value">{(analysisResult.analysis_confidence * 100).toFixed(0)}%</span>
-            </div>
-            
-            <div className="info-row">
-              <span className="info-label">Weather Impact:</span>
-              <span className="info-value">
-                Risk Level: {analysisResult.prediction?.weather_risk?.risk_level?.toUpperCase() || 'Low'}
-              </span>
-            </div>
-            
-            {/* Suggested Values */}
-            <div style={{
-              background: '#f0fdf4',
-              padding: '1rem',
-              borderRadius: '8px',
-              marginTop: '1rem'
-            }}>
-              <strong>💡 AI Suggestions:</strong>
-              <div className="info-row">
-                <span className="info-label">Suggested Harvest Window:</span>
-                <span className="info-value">
-                  {analysisResult.prediction?.days_to_wait || 0} days from now
-                </span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Expected Days to Harvest:</span>
-                <span className="info-value">
-                  {analysisResult.prediction?.days_to_wait ? 
-                    (analysisResult.prediction.days_to_wait + 30) : 90} days
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-      
-      <div className="modal-footer">
-        <button type="button" className="btn btn-outline" onClick={() => setStep(2)}>
-          Back to Image
-        </button>
-        <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-          {loading ? 'Adding Crop...' : 'Add Crop with AI Data'}
-        </button>
-      </div>
-    </div>
-  );
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-        <div className="modal-header">
-          <h3>Add New Crop {step > 1 && `(Step ${step-1}/2)`}</h3>
-          <button className="close-modal" onClick={onClose}>×</button>
-        </div>
-        
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
+    <AnimatePresence>
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          className="bg-white rounded-2xl max-w-md w-full shadow-xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-4 flex justify-between items-center">
+            <h3 className="text-lg font-bold text-white">
+              Add New Crop {step > 1 && `(Step ${step-1}/2)`}
+            </h3>
+            <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+              <FiX size={20} className="text-white" />
+            </button>
+          </div>
+
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            {step === 1 && (
+              <form onSubmit={(e) => { e.preventDefault(); setStep(2); }} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Crop Type *</label>
+                  <input type="text" required value={formData.crop_type} onChange={(e) => setFormData({...formData, crop_type: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="e.g., Rice, Wheat" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Crop Variety *</label>
+                  <input type="text" required value={formData.crop_variety} onChange={(e) => setFormData({...formData, crop_variety: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="e.g., Basmati" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Planting Date *</label>
+                  <input type="date" required value={formData.planting_date} onChange={(e) => setFormData({...formData, planting_date: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Area Planted (hectares) *</label>
+                  <input type="number" step="0.1" required value={formData.area_planted} onChange={(e) => setFormData({...formData, area_planted: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="e.g., 2.5" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Expected Days to Harvest *</label>
+                  <input type="number" required value={formData.expected_days_to_harvest} onChange={(e) => setFormData({...formData, expected_days_to_harvest: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="e.g., 120" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
+                  <textarea rows="2" value={formData.notes} onChange={(e) => setFormData({...formData, notes: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Any additional information..." />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={onClose} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+                  <button type="submit" className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors">Next: Add Image →</button>
+                </div>
+              </form>
+            )}
+
+            {step === 2 && (
+              <div>
+                <div className="text-center mb-5">
+                  <p className="text-gray-500 text-sm">Upload a clear image of your crop for AI analysis</p>
+                </div>
+                
+                {!previewUrl ? (
+                  <div onClick={() => document.getElementById('cropImageInput').click()} className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-emerald-500 transition-colors">
+                    <FiCamera size={40} className="mx-auto text-gray-400 mb-2" />
+                    <p className="text-gray-600 text-sm">Click to upload crop image</p>
+                    <p className="text-gray-400 text-xs mt-1">JPEG or PNG (max 10MB)</p>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <img src={previewUrl} alt="Crop preview" className="max-w-full max-h-40 rounded-lg mx-auto mb-2" />
+                    <button onClick={() => { setSelectedImage(null); setPreviewUrl(null); setAnalysisResult(null); }} className="text-xs text-red-500 hover:text-red-600">Change Image</button>
+                  </div>
+                )}
+                
+                <input id="cropImageInput" type="file" accept="image/jpeg,image/png" onChange={handleImageSelect} className="hidden" />
+                
+                {analyzing && (
+                  <div className="mt-4">
+                    <div className="w-full bg-gray-200 rounded-full h-1.5">
+                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+                    </div>
+                    <p className="text-center text-xs text-gray-500 mt-2">AI Analyzing crop... {uploadProgress}%</p>
+                  </div>
+                )}
+                
+                <div className="flex gap-3 pt-6">
+                  <button onClick={() => setStep(1)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm">
+                    <FiArrowLeft size={14} />Back
+                  </button>
+                  <button onClick={handleAIAnalysis} disabled={!selectedImage || analyzing} className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 text-sm">
+                    {analyzing ? 'Analyzing...' : 'Run AI Analysis'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && analysisResult && (
+              <div>
+                <div className={`p-3 rounded-lg mb-4 border-l-4`} style={{ background: `${analysisResult.color_code}15`, borderLeftColor: analysisResult.color_code }}>
+                  <div className="flex items-center gap-2">
+                    {analysisResult.action_priority === 'high' ? <FiCheckCircle color={analysisResult.color_code} size={18} /> : <FiAlertCircle color={analysisResult.color_code} size={18} />}
+                    <div>
+                      <p className="text-xs text-gray-500">AI Recommendation</p>
+                      <p className="text-sm font-semibold" style={{ color: analysisResult.color_code }}>{analysisResult.final_recommendation}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500 text-sm">Maturity Stage:</span>
+                    <span className="font-medium text-gray-800 text-sm">{analysisResult.image_analysis.maturity.stage.toUpperCase()} ({analysisResult.image_analysis.maturity.score}%)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500 text-sm">Disease Status:</span>
+                    <span className="font-medium text-gray-800 text-sm">{analysisResult.image_analysis.disease.disease.replace('_', ' ').toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500 text-sm">Analysis Confidence:</span>
+                    <span className="font-medium text-gray-800 text-sm">{(analysisResult.analysis_confidence * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+                
+                <div className="mt-4 p-3 bg-emerald-50 rounded-lg">
+                  <p className="text-xs text-emerald-800"><strong>💡 AI Suggestion:</strong> Expected harvest in {analysisResult.prediction?.days_to_wait || 0} days</p>
+                </div>
+                
+                <div className="flex gap-3 pt-5">
+                  <button onClick={() => setStep(2)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm">Back</button>
+                  <button onClick={handleSubmit} disabled={loading} className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 text-sm">
+                    {loading ? 'Adding...' : 'Add Crop'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
       </div>
-    </div>
+    </AnimatePresence>
   );
 };
 
