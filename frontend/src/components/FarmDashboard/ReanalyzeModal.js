@@ -8,12 +8,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 const API_URL = 'http://localhost:8000/api';
 
 const ReanalyzeModal = ({ crop, onClose }) => {
-  const { updateCrop } = useFarm();
+  const { updateCrop, refreshCrops, farm } = useFarm();
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const handleImageSelect = (event) => {
     const file = event.target.files[0];
@@ -43,7 +44,7 @@ const ReanalyzeModal = ({ crop, onClose }) => {
     
     const formData = new FormData();
     formData.append('image', selectedImage);
-    formData.append('user_id', crop.farm_id);
+    formData.append('user_id', crop.farm_id || farm?.uid);
 
     try {
       const interval = setInterval(() => {
@@ -71,23 +72,59 @@ const ReanalyzeModal = ({ crop, onClose }) => {
   const handleSaveAnalysis = async () => {
     if (!analysisResult) return;
     
-    const updates = {
-      ai_analysis: {
-        maturity: analysisResult.image_analysis?.maturity,
-        disease: analysisResult.image_analysis?.disease,
-        recommendation: analysisResult.final_recommendation,
-        confidence: analysisResult.analysis_confidence,
-        prediction: analysisResult.prediction,
-        reanalyzed_at: new Date().toISOString()
+    setSaving(true);
+    
+    const newAIAnalysis = {
+      maturity: {
+        stage: analysisResult.image_analysis?.maturity?.stage,
+        score: analysisResult.image_analysis?.maturity?.score,
+        confidence: analysisResult.image_analysis?.maturity?.confidence,
+        metrics: analysisResult.image_analysis?.maturity?.metrics
       },
-      notes: `Reanalyzed: ${analysisResult.final_recommendation}. Maturity: ${analysisResult.image_analysis.maturity.stage} (${analysisResult.image_analysis.maturity.score}%), Disease: ${analysisResult.image_analysis.disease.disease}\n\nPrevious notes: ${crop.notes || ''}`
+      disease: {
+        disease: analysisResult.image_analysis?.disease?.disease,
+        severity: analysisResult.image_analysis?.disease?.severity,
+        confidence: analysisResult.image_analysis?.disease?.confidence
+      },
+      recommendation: analysisResult.final_recommendation,
+      confidence: analysisResult.analysis_confidence,
+      prediction: analysisResult.prediction,
+      reanalyzed_at: new Date().toISOString(),
+      reanalyzed_image: previewUrl
     };
     
+    const newNotes = `[Reanalyzed on ${new Date().toLocaleString()}]\n` +
+      `AI Recommendation: ${analysisResult.final_recommendation}\n` +
+      `Maturity: ${analysisResult.image_analysis?.maturity?.stage?.toUpperCase()} (${analysisResult.image_analysis?.maturity?.score}%)\n` +
+      `Disease: ${analysisResult.image_analysis?.disease?.disease?.replace('_', ' ').toUpperCase()}\n` +
+      `Confidence: ${(analysisResult.analysis_confidence * 100).toFixed(0)}%\n` +
+      `Weather Risk: ${analysisResult.prediction?.weather_risk?.risk_level?.toUpperCase() || 'Low'}\n` +
+      `Expected harvest: ${analysisResult.prediction?.days_to_wait || 0} days\n\n` +
+      `${crop.notes || ''}`;
+    
+    const updates = {
+      ai_analysis: newAIAnalysis,
+      notes: newNotes,
+      last_reanalyzed: new Date().toISOString()
+    };
+    
+    if (analysisResult.prediction?.days_to_wait) {
+      const currentDaysPlanted = crop.days_planted || 0;
+      const suggestedTotalDays = currentDaysPlanted + analysisResult.prediction.days_to_wait;
+      if (suggestedTotalDays >= 30 && suggestedTotalDays <= 200) {
+        updates.expected_days_to_harvest = suggestedTotalDays;
+      }
+    }
+    
     const success = await updateCrop(crop.crop_id || crop.id, updates);
+    
     if (success) {
       toast.success('Crop re-analysis saved successfully!');
+      await refreshCrops();
       onClose();
     }
+    
+    setSaving(false);
   };
 
   return (
@@ -101,18 +138,19 @@ const ReanalyzeModal = ({ crop, onClose }) => {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-4 flex justify-between items-center">
-            <h3 className="text-lg font-bold text-white">
-              Reanalyze: {crop.crop_type}
-            </h3>
-            <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-              <FiX size={20} className="text-white" />
-            </button>
+            <h3 className="text-lg font-bold text-white">Reanalyze: {crop.crop_type}</h3>
+            <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><FiX size={20} className="text-white" /></button>
           </div>
 
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            <div className="text-center mb-5">
-              <p className="text-gray-500 text-sm">Upload a new image of your crop for updated AI analysis</p>
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500 mb-1">Current Analysis</p>
+              <div className="flex justify-between text-sm"><span>Maturity:</span><span className="font-medium">{crop.ai_analysis?.maturity?.stage?.toUpperCase() || crop.status?.toUpperCase() || 'Unknown'}</span></div>
+              <div className="flex justify-between text-sm mt-1"><span>Disease:</span><span className="font-medium">{crop.ai_analysis?.disease?.disease?.replace('_', ' ').toUpperCase() || 'Unknown'}</span></div>
+              <div className="flex justify-between text-sm mt-1"><span>Confidence:</span><span className="font-medium">{crop.ai_analysis?.confidence ? `${(crop.ai_analysis.confidence * 100).toFixed(0)}%` : 'N/A'}</span></div>
             </div>
+            
+            <div className="text-center mb-5"><p className="text-gray-500 text-sm">Upload a new image to update the AI analysis</p></div>
             
             {!previewUrl ? (
               <div onClick={() => document.getElementById('reanalyzeImageInput').click()} className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-emerald-500 transition-colors">
@@ -129,54 +167,33 @@ const ReanalyzeModal = ({ crop, onClose }) => {
             
             <input id="reanalyzeImageInput" type="file" accept="image/jpeg,image/png" onChange={handleImageSelect} className="hidden" />
             
-            {analyzing && (
-              <div className="mt-4">
-                <div className="w-full bg-gray-200 rounded-full h-1.5">
-                  <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
-                </div>
-                <p className="text-center text-xs text-gray-500 mt-2">AI Analyzing crop... {uploadProgress}%</p>
-              </div>
-            )}
+            {analyzing && (<div className="mt-4"><div className="w-full bg-gray-200 rounded-full h-1.5"><div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} /></div><p className="text-center text-xs text-gray-500 mt-2">AI Analyzing crop... {uploadProgress}%</p></div>)}
             
             {analysisResult && !analyzing && (
               <div className="mt-4">
                 <div className={`p-3 rounded-lg mb-4 border-l-4`} style={{ background: `${analysisResult.color_code}15`, borderLeftColor: analysisResult.color_code }}>
                   <div className="flex items-center gap-2">
                     {analysisResult.action_priority === 'high' ? <FiCheckCircle color={analysisResult.color_code} size={18} /> : <FiAlertCircle color={analysisResult.color_code} size={18} />}
-                    <div>
-                      <p className="text-xs text-gray-500">New AI Recommendation</p>
-                      <p className="text-sm font-semibold" style={{ color: analysisResult.color_code }}>{analysisResult.final_recommendation}</p>
-                    </div>
+                    <div><p className="text-xs text-gray-500">New AI Recommendation</p><p className="text-sm font-semibold" style={{ color: analysisResult.color_code }}>{analysisResult.final_recommendation}</p></div>
                   </div>
                 </div>
                 
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm">Maturity Stage:</span>
-                    <span className="font-medium text-gray-800 text-sm">{analysisResult.image_analysis.maturity.stage.toUpperCase()} ({analysisResult.image_analysis.maturity.score}%)</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm">Disease Status:</span>
-                    <span className="font-medium text-gray-800 text-sm">{analysisResult.image_analysis.disease.disease.replace('_', ' ').toUpperCase()}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-sm">Analysis Confidence:</span>
-                    <span className="font-medium text-gray-800 text-sm">{(analysisResult.analysis_confidence * 100).toFixed(0)}%</span>
-                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100"><span className="text-gray-500 text-sm">AI Maturity:</span><span className="font-semibold text-gray-800 text-sm">{analysisResult.image_analysis.maturity.stage.toUpperCase()} <span className="text-gray-500 ml-1">({analysisResult.image_analysis.maturity.score}%)</span></span></div>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100"><span className="text-gray-500 text-sm">Disease Status:</span><span className={`font-semibold text-sm ${analysisResult.image_analysis.disease.disease === 'healthy' ? 'text-green-600' : 'text-red-600'}`}>{analysisResult.image_analysis.disease.disease.replace('_', ' ').toUpperCase()}</span></div>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100"><span className="text-gray-500 text-sm">AI Confidence:</span><span className="font-semibold text-gray-800 text-sm">{(analysisResult.analysis_confidence * 100).toFixed(0)}%</span></div>
                 </div>
+                
+                <div className="mt-4 p-3 bg-emerald-50 rounded-lg"><p className="text-xs text-emerald-800"><strong>💡 This will update the crop's:</strong> Maturity stage, Disease status, Confidence score, and add a reanalysis record to notes.</p></div>
               </div>
             )}
             
             <div className="flex gap-3 pt-6">
               <button onClick={onClose} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm">Cancel</button>
               {!analysisResult ? (
-                <button onClick={handleAIAnalysis} disabled={!selectedImage || analyzing} className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 text-sm">
-                  {analyzing ? 'Analyzing...' : 'Run AI Analysis'}
-                </button>
+                <button onClick={handleAIAnalysis} disabled={!selectedImage || analyzing} className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 text-sm">{analyzing ? 'Analyzing...' : 'Run AI Analysis'}</button>
               ) : (
-                <button onClick={handleSaveAnalysis} className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors text-sm">
-                  Save New Analysis
-                </button>
+                <button onClick={handleSaveAnalysis} disabled={saving} className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 text-sm">{saving ? 'Saving...' : 'Save & Update Crop'}</button>
               )}
             </div>
           </div>

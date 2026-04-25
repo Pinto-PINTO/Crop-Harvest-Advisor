@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useFarm } from '../../context/FarmContext';
 import CropDetails from './CropDetails';
-import { FiEdit2, FiTrash2, FiActivity, FiCalendar, FiMapPin, FiRefreshCw } from 'react-icons/fi';
+import { FiEdit2, FiTrash2, FiActivity, FiCalendar, FiMapPin, FiRefreshCw, FiAlertCircle, FiCheckCircle } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 
@@ -17,6 +17,17 @@ const CropCard = ({ crop, onReanalyze }) => {
   };
 
   const status = statusConfig[crop.status] || statusConfig.growing;
+
+  // Health icon and color mapping
+  const getHealthIcon = () => {
+    switch(crop.health_status) {
+      case 'healthy': return <FiCheckCircle size={14} />;
+      case 'disease_severe': return <FiAlertCircle size={14} />;
+      case 'disease_moderate': return <FiAlertCircle size={14} />;
+      case 'disease_mild': return <FiAlertCircle size={14} />;
+      default: return <FiActivity size={14} />;
+    }
+  };
 
   const handleDelete = async (e) => {
     e.stopPropagation();
@@ -82,37 +93,17 @@ const CropCard = ({ crop, onReanalyze }) => {
             </div>
           </div>
 
-          <div className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-sm ${
-            crop.health_status === 'healthy' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
-          }`}>
-            <div className={`w-2 h-2 rounded-full ${crop.health_status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'}`} />
+          {/* Dynamic Health Tag */}
+          <div className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-sm ${crop.health_color || 'bg-green-50 text-green-700'}`}>
+            {getHealthIcon()}
             <span>{crop.health_text}</span>
           </div>
         </div>
 
-        {/* Button Row - Fixed styling */}
         <div className="grid grid-cols-3 divide-x divide-gray-100 border-t border-gray-100">
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowDetails(true); }}
-            className="py-3 text-sm font-medium text-gray-600 hover:text-emerald-600 hover:bg-emerald-50 transition-all flex items-center justify-center gap-2"
-          >
-            <FiEdit2 size={15} />
-            <span>Details</span>
-          </button>
-          <button
-            onClick={handleReanalyze}
-            className="py-3 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-2"
-          >
-            <FiRefreshCw size={15} />
-            <span>Reanalyze</span>
-          </button>
-          <button
-            onClick={handleDelete}
-            className="py-3 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center gap-2"
-          >
-            <FiTrash2 size={15} />
-            <span>Delete</span>
-          </button>
+          <button onClick={(e) => { e.stopPropagation(); setShowDetails(true); }} className="py-3 text-sm font-medium text-gray-600 hover:text-emerald-600 hover:bg-emerald-50 transition-all flex items-center justify-center gap-2"><FiEdit2 size={15} /><span>Details</span></button>
+          <button onClick={handleReanalyze} className="py-3 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-2"><FiRefreshCw size={15} /><span>Reanalyze</span></button>
+          <button onClick={handleDelete} className="py-3 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center gap-2"><FiTrash2 size={15} /><span>Delete</span></button>
         </div>
       </motion.div>
 
